@@ -6580,7 +6580,11 @@ async function applyCanonicalDocumentToCollabInner(
   const origin = source ?? 'external-write';
   const debugConvergence = (process.env.COLLAB_DEBUG_FRAGMENT_CONVERGENCE || '').trim() === '1';
 
-  if (hadLiveDoc && shouldBlockLegacyLiveApplySource(origin)) {
+  // Allow marks-only updates from the engine through to the live doc so that
+  // API-created suggestions/comments are synced to connected collab clients and
+  // hydrated as ProseMirror inline marks (enabling accept/reject in the editor UI).
+  const isMarksOnlyUpdate = marks && !markdown;
+  if (hadLiveDoc && shouldBlockLegacyLiveApplySource(origin) && !isMarksOnlyUpdate) {
     const liveState = hasHocuspocusEntry ? 'live_doc' : 'loaded_doc';
     recordLegacyReverseFlowBlocked(origin, liveState);
     const projectionMarkedStale = markProjectionStaleForLegacyReverseFlowBlock(slug, origin, liveState, {
