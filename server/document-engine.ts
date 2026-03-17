@@ -1741,24 +1741,13 @@ function updateSuggestionStatus(
   const updated = getDocumentBySlug(slug);
   const resolvedRevision = typeof updated?.revision === 'number' ? updated.revision : (doc.revision + 1);
   upsertMarkTombstone(slug, markId, status, resolvedRevision);
-  if (status === 'rejected') {
-    // Rejected suggestions must survive reload/cache clear, and stale live Yjs fragments
-    // can otherwise rehydrate the rejected mark after the canonical DB write succeeds.
-    // Bump the access epoch first so collab sessions on every node reconnect against
-    // canonical DB state instead of reusing stale in-memory rooms on other instances.
-    bumpDocumentAccessEpoch(slug);
-    invalidateCollabDocument(slug);
-  } else {
-    const collabMarkdown = updated?.markdown ?? nextMarkdown;
-    void applyCanonicalDocumentToCollab(slug, {
-      markdown: collabMarkdown,
-      marks: nextMarks as unknown as Record<string, unknown>,
-      source: 'engine',
-    }).catch((error) => {
-      console.error('[document-engine] Failed to sync suggestion status to collab projection; invalidating collab state', { slug, status, error });
-      invalidateCollabDocument(slug);
-    });
-  }
+  // Bump the access epoch and invalidate the collab document so all connected
+  // clients reconnect against canonical DB state.  For accepts the previous
+  // applyCanonicalDocumentToCollab path was blocked by the legacy reverse-flow
+  // guard (source 'engine' + markdown change), so we use the same reliable
+  // invalidation strategy that already works for rejections.
+  bumpDocumentAccessEpoch(slug);
+  invalidateCollabDocument(slug);
   if (updated) {
     void rebuildDocumentBlocks(updated, updated.markdown, updated.revision).catch((error) => {
       console.error('[document-engine] Failed to rebuild block index after suggestion update:', { slug, error });
@@ -2226,12 +2215,13 @@ async function updateSuggestionStatusAsync(
       status,
     },
   };
-  if (status === 'rejected') {
-    if ((mutation.document.access_epoch ?? doc.access_epoch) === doc.access_epoch) {
-      bumpDocumentAccessEpoch(slug);
-    }
-    invalidateCollabDocument(slug);
+  // Force all collab clients to reconnect against canonical DB state for both
+  // accept and reject — the legacy reverse-flow guard blocks engine-sourced
+  // markdown updates on live docs, so invalidation is the reliable path.
+  if ((mutation.document.access_epoch ?? doc.access_epoch) === doc.access_epoch) {
+    bumpDocumentAccessEpoch(slug);
   }
+  invalidateCollabDocument(slug);
 
   return {
     status: 200,
