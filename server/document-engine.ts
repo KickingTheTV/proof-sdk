@@ -1741,13 +1741,26 @@ function updateSuggestionStatus(
   const updated = getDocumentBySlug(slug);
   const resolvedRevision = typeof updated?.revision === 'number' ? updated.revision : (doc.revision + 1);
   upsertMarkTombstone(slug, markId, status, resolvedRevision);
-  // Bump the access epoch and invalidate the collab document so all connected
-  // clients reconnect against canonical DB state.  For accepts the previous
-  // applyCanonicalDocumentToCollab path was blocked by the legacy reverse-flow
-  // guard (source 'engine' + markdown change), so we use the same reliable
-  // invalidation strategy that already works for rejections.
-  bumpDocumentAccessEpoch(slug);
-  invalidateCollabDocument(slug);
+  if (status === 'rejected') {
+    // Rejected suggestions must survive reload/cache clear, and stale live Yjs fragments
+    // can otherwise rehydrate the rejected mark after the canonical DB write succeeds.
+    bumpDocumentAccessEpoch(slug);
+    invalidateCollabDocument(slug);
+  } else {
+    // Accepted suggestions modify markdown and must sync to the live collab doc.
+    // Use source 'suggestion-status' which is NOT blocked by shouldBlockLegacyLiveApplySource,
+    // allowing the update to flow through to connected collab clients.  The agent route's
+    // notifyCollabMutation with strictLiveDoc:true depends on this sync succeeding.
+    const collabMarkdown = updated?.markdown ?? nextMarkdown;
+    void applyCanonicalDocumentToCollab(slug, {
+      markdown: collabMarkdown,
+      marks: nextMarks as unknown as Record<string, unknown>,
+      source: 'suggestion-status',
+    }).catch((error) => {
+      console.error('[document-engine] Failed to sync suggestion acceptance to collab; invalidating', { slug, error });
+      invalidateCollabDocument(slug);
+    });
+  }
   if (updated) {
     void rebuildDocumentBlocks(updated, updated.markdown, updated.revision).catch((error) => {
       console.error('[document-engine] Failed to rebuild block index after suggestion update:', { slug, error });
@@ -2215,13 +2228,23 @@ async function updateSuggestionStatusAsync(
       status,
     },
   };
-  // Force all collab clients to reconnect against canonical DB state for both
-  // accept and reject — the legacy reverse-flow guard blocks engine-sourced
-  // markdown updates on live docs, so invalidation is the reliable path.
-  if ((mutation.document.access_epoch ?? doc.access_epoch) === doc.access_epoch) {
-    bumpDocumentAccessEpoch(slug);
+  if (status === 'rejected') {
+    if ((mutation.document.access_epoch ?? doc.access_epoch) === doc.access_epoch) {
+      bumpDocumentAccessEpoch(slug);
+    }
+    invalidateCollabDocument(slug);
+  } else {
+    // Accepted suggestions must sync markdown + marks to the live collab doc.
+    // Use source 'suggestion-status' to bypass shouldBlockLegacyLiveApplySource.
+    void applyCanonicalDocumentToCollab(slug, {
+      markdown: mutation.document.markdown,
+      marks: updatedMarks as unknown as Record<string, unknown>,
+      source: 'suggestion-status',
+    }).catch((error) => {
+      console.error('[document-engine] Failed to sync suggestion acceptance to collab; invalidating', { slug, error });
+      invalidateCollabDocument(slug);
+    });
   }
-  invalidateCollabDocument(slug);
 
   return {
     status: 200,
