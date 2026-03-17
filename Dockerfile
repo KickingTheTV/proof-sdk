@@ -4,10 +4,8 @@ WORKDIR /app
 
 # Copy package files first for better layer caching
 COPY package*.json ./
-COPY packages/*/package*.json packages/
-COPY apps/*/package*.json apps/
 
-RUN npm ci --production=false
+RUN npm ci
 
 # Copy source
 COPY . .
@@ -15,7 +13,7 @@ COPY . .
 # Build frontend
 RUN npm run build
 
-# Expose API + editor ports
+# Expose API port
 EXPOSE 4000
 
 # Default environment
