@@ -28,7 +28,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: 3000,
+    port: 3009,
     strictPort: true,  // Fail if port in use instead of auto-incrementing
     open: false,
     host: 'localhost',
