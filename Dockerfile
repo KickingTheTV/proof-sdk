@@ -22,6 +22,7 @@ EXPOSE 4000
 ENV PORT=4000
 ENV NODE_ENV=production
 ENV COLLAB_EMBEDDED_WS=true
+ENV DATABASE_PATH=/data/proof-share.db
 
 # Start the API server (serves both API and built frontend)
 CMD ["npx", "tsx", "server/index.ts"]
