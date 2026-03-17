@@ -3286,53 +3286,7 @@ agentRoutes.post('/:slug/marks/accept', async (req: Request, res: Response) => {
   const result = await executeDocumentOperationAsync(slug, 'POST', '/marks/accept', payload, mutationContext);
   maybeLogMarkHydrationMismatch(mutationRoute, slug, payload, mutationContext, result);
   if (result.status >= 200 && result.status < 300) {
-    const collabStatus = await notifyCollabMutation(
-      slug,
-      buildParticipationFromMutation(req, slug, payload, { details: 'suggestion.accept' }),
-      {
-        verify: true,
-        source: 'marks.accept',
-        stabilityMs: EDIT_COLLAB_STABILITY_MS,
-        strictLiveDoc: true,
-        apply: false,
-      },
-    );
-    if (isRecord(result.body)) {
-      result.body = {
-        ...result.body,
-        collab: {
-          status: collabStatus.confirmed ? 'confirmed' : 'pending',
-          reason: collabStatus.reason ?? (collabStatus.confirmed ? 'confirmed' : 'sync_timeout'),
-          markdownConfirmed: collabStatus.markdownConfirmed ?? null,
-          fragmentConfirmed: collabStatus.fragmentConfirmed ?? null,
-          canonicalConfirmed: collabStatus.canonicalConfirmed ?? null,
-        },
-      };
-    }
-    if (!collabStatus.confirmed) {
-      const failureBody = {
-        success: false,
-        code: 'COLLAB_SYNC_FAILED',
-        error: 'Suggestion acceptance did not converge to live collaboration state',
-        reason: collabStatus.reason ?? 'sync_timeout',
-        retryWithState: `/api/agent/${slug}/state`,
-        collab: {
-          status: 'pending',
-          reason: collabStatus.reason ?? 'sync_timeout',
-          markdownConfirmed: collabStatus.markdownConfirmed ?? null,
-          fragmentConfirmed: collabStatus.fragmentConfirmed ?? null,
-          canonicalConfirmed: collabStatus.canonicalConfirmed ?? null,
-        },
-      } satisfies Record<string, unknown>;
-      storeIdempotentMutationResult(replay, mutationRoute, slug, 409, failureBody);
-      sendMutationResponse(
-        res,
-        409,
-        failureBody,
-        { route: mutationRoute, slug, retryWithState: `/api/agent/${slug}/state` },
-      );
-      return;
-    }
+    notifyCollabMutation(slug, buildParticipationFromMutation(req, slug, payload, { details: 'suggestion.accept' }), { apply: false });
   }
   storeIdempotentMutationResult(replay, mutationRoute, slug, result.status, result.body);
   sendMutationResponse(res, result.status, result.body, { route: mutationRoute, slug });
